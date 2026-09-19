@@ -1,0 +1,542 @@
+---
+title: "Heart Failure Model Validation"
+subtitle: "Improving Validation Design for Mortality Classification Models"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+    theme: readable
+---
+
+```{r setup, include=FALSE}
+SEED <- 1
+DATA_PATH <- "../data/raw/heart_failure_clinical_records_dataset.csv"
+FIGURE_PATH <- "../figures"
+
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.align = "center",
+  fig.width = 8,
+  fig.height = 5,
+  dpi = 160
+)
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(caret)
+library(MASS)
+library(pROC)
+library(kernlab)
+library(nnet)
+library(MVN)
+library(biotools)
+
+dir.create(FIGURE_PATH, recursive = TRUE, showWarnings = FALSE)
+set.seed(SEED)
+```
+
+# 1. Purpose
+
+This project began as multivariate statistics coursework comparing LDA, QDA,
+linear and RBF SVM, and an artificial neural network (ANN) for classifying
+DEATH_EVENT. A portfolio review later found that the reported performances were
+not directly comparable. LDA and QDA used cross-validation, SVM performance was
+calculated by predicting the training data, and ANN performance came from one
+hold-out split.
+
+The updated question is:
+
+> When LDA, QDA, SVM, and ANN models are evaluated under the same resampling
+> design, how do their discrimination performance and error profiles differ?
+
+The goal is to improve validation design and compare error trade-offs. The
+
+# 2. Data and outcome
+
+```{r load-data}
+raw_data <- read.csv(DATA_PATH)
+
+clinical_variables <- c(
+  "age",
+  "creatinine_phosphokinase",
+  "ejection_fraction",
+  "platelets",
+  "serum_creatinine",
+  "serum_sodium"
+)
+
+model_data <- raw_data |>
+  dplyr::select(DEATH_EVENT, dplyr::all_of(clinical_variables)) |>
+  mutate(
+    # caret::twoClassSummary treats the first factor level as the event.
+    DEATH_EVENT = factor(
+      DEATH_EVENT,
+      levels = c(1, 0),
+      labels = c("Died", "Survived")
+    )
+  )
+
+data_summary <- tibble(
+  Patients = nrow(model_data),
+  Deaths = sum(model_data$DEATH_EVENT == "Died"),
+  Survivors = sum(model_data$DEATH_EVENT == "Survived"),
+  Missing_values = sum(is.na(model_data))
+)
+
+knitr::kable(data_summary)
+```
+
+The dataset contains 299 patients, including 96 deaths and 203 survivors. No
+missing values were found in the analysis variables.
+
+The original dataset includes time, which records follow-up duration. It is not
+used as an ordinary predictor because doing so would mix post-baseline follow-up
+information with the classification target and could introduce target-related
+leakage. This project is neither survival analysis nor prediction of mortality
+at a fixed time horizon. No Cox model or Kaplan-Meier analysis is added.
+
+# 3. Focused exploratory analysis
+
+## 3.1 Observed group differences
+
+```{r group-summary}
+group_summary <- model_data |>
+  group_by(DEATH_EVENT) |>
+  summarise(
+    across(
+      all_of(clinical_variables),
+      list(mean = mean, median = median),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop"
+  )
+
+knitr::kable(group_summary, digits = 2)
+```
+
+```{r group-boxplots, fig.cap="Observed distributions of six clinical variables by outcome group."}
+boxplot_data <- model_data |>
+  pivot_longer(
+    cols = all_of(clinical_variables),
+    names_to = "Variable",
+    values_to = "Value"
+  )
+
+group_boxplot <- ggplot(
+  boxplot_data,
+  aes(x = DEATH_EVENT, y = Value, fill = DEATH_EVENT)
+) +
+  geom_boxplot(width = 0.65, outlier.alpha = 0.35) +
+  facet_wrap(~ Variable, scales = "free_y", ncol = 3) +
+  scale_fill_manual(values = c(Died = "#C44E52", Survived = "#4C72B0")) +
+  labs(x = NULL, y = NULL, fill = "Outcome") +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom", panel.grid.minor = element_blank())
+
+ggsave(
+  file.path(FIGURE_PATH, "group_boxplots.png"),
+  group_boxplot,
+  width = 10,
+  height = 6.5,
+  dpi = 180
+)
+
+group_boxplot
+```
+
+The death group was older on average, had lower ejection fraction, higher serum
+creatinine, and lower serum sodium. These are observed group differences only.
+This analysis does not estimate adjusted effects, odds ratios, or causal risk
+factors.
+
+## 3.2 Correlation and discriminant-analysis assumptions
+
+```{r correlation}
+correlation_matrix <- model_data |>
+  dplyr::select(all_of(clinical_variables)) |>
+  cor()
+
+knitr::kable(correlation_matrix, digits = 2)
+```
+
+```{r assumption-checks}
+hz_died <- MVN::mvn(
+  data = model_data |>
+    filter(DEATH_EVENT == "Died") |>
+    dplyr::select(all_of(clinical_variables)),
+  mvn_test = "hz"
+)
+
+hz_survived <- MVN::mvn(
+  data = model_data |>
+    filter(DEATH_EVENT == "Survived") |>
+    dplyr::select(all_of(clinical_variables)),
+  mvn_test = "hz"
+)
+
+box_m <- biotools::boxM(
+  model_data |> dplyr::select(all_of(clinical_variables)),
+  grouping = model_data$DEATH_EVENT
+)
+
+assumption_results <- tibble(
+  Test = c("Henze-Zirkler: Died", "Henze-Zirkler: Survived", "Box's M"),
+  P_value = c(
+    hz_died$multivariate_normality$p.value,
+    hz_survived$multivariate_normality$p.value,
+    box_m$p.value
+  )
+)
+
+knitr::kable(assumption_results, digits = 5)
+```
+
+Multivariate normality was not supported in either group, and covariance
+homogeneity was also rejected. LDA and QDA are retained as educational
+comparators, but their results should be interpreted cautiously.
+
+# 4. Original validation issues
+
+| Model | Original evaluation | Main issue |
+|---|---|---|
+| LDA | Leave-one-out cross-validation | Different evaluation scheme |
+| QDA | Leave-one-out cross-validation | Different scheme and priors reversed relative to factor levels |
+| Linear SVM | Prediction on training data | Optimistic estimate |
+| RBF SVM | Prediction on training data | Reported 2.68% error was training error |
+| ANN | One 60:40 hold-out split | Split-dependent estimate; scaling preceded splitting |
+
+The original coursework is preserved rather than silently corrected. Details are
+recorded in docs/validation_changes.md.
+
+# 5. Common validation design
+
+The comparison uses stratified 5-fold cross-validation repeated 5 times, the
+same training folds for every model, fold-internal centering and scaling, and
+Died as the positive class. ROC-AUC is the tuning metric. Sensitivity,
+specificity, balanced accuracy, and accuracy are reported alongside it. The seed
+is fixed at 1 before fold creation and every model fit.
+
+```{r create-folds}
+set.seed(SEED)
+
+cv_index <- createMultiFolds(
+  y = model_data$DEATH_EVENT,
+  k = 5,
+  times = 5
+)
+
+length(cv_index)
+```
+
+```{r summary-and-control}
+clinical_summary <- function(data, lev = NULL, model = NULL) {
+  two_class <- caret::twoClassSummary(data = data, lev = lev, model = model)
+  default <- caret::defaultSummary(data = data, lev = lev, model = model)
+
+  c(
+    ROC = unname(two_class["ROC"]),
+    Sensitivity = unname(two_class["Sens"]),
+    Specificity = unname(two_class["Spec"]),
+    Balanced_Accuracy = unname(
+      (two_class["Sens"] + two_class["Spec"]) / 2
+    ),
+    Accuracy = unname(default["Accuracy"])
+  )
+}
+
+ctrl <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 5,
+  index = cv_index,
+  classProbs = TRUE,
+  summaryFunction = clinical_summary,
+  savePredictions = "final",
+  allowParallel = FALSE
+)
+```
+
+# 6. Model fitting
+
+No model family or post-hoc tuning search was added.
+
+## 6.1 LDA and QDA
+
+```{r fit-discriminant-models}
+set.seed(SEED)
+fit_lda <- train(
+  DEATH_EVENT ~ ., data = model_data, method = "lda",
+  metric = "ROC", maximize = TRUE, trControl = ctrl,
+  preProcess = c("center", "scale")
+)
+
+set.seed(SEED)
+fit_qda <- train(
+  DEATH_EVENT ~ ., data = model_data, method = "qda",
+  metric = "ROC", maximize = TRUE, trControl = ctrl,
+  preProcess = c("center", "scale")
+)
+```
+
+## 6.2 Linear and RBF SVM
+
+```{r fit-svm-models}
+grid_svm_linear <- expand.grid(C = 2^seq(-5, 5, by = 1))
+
+set.seed(SEED)
+fit_svm_linear <- train(
+  DEATH_EVENT ~ ., data = model_data, method = "svmLinear",
+  metric = "ROC", maximize = TRUE, trControl = ctrl,
+  preProcess = c("center", "scale"), tuneGrid = grid_svm_linear
+)
+
+set.seed(SEED)
+fit_svm_rbf <- train(
+  DEATH_EVENT ~ ., data = model_data, method = "svmRadial",
+  metric = "ROC", maximize = TRUE, trControl = ctrl,
+  preProcess = c("center", "scale"), tuneLength = 10
+)
+```
+
+## 6.3 ANN
+
+The coursework used neuralnet. The update uses nnet so the ANN follows the same
+caret resampling and fold-internal preprocessing. This is a standardized ANN
+comparison, not an exact reproduction of the original network implementation.
+
+```{r fit-ann}
+grid_ann <- expand.grid(
+  size = c(1, 3, 5),
+  decay = c(0, 0.001, 0.01, 0.1)
+)
+
+set.seed(SEED)
+fit_ann <- train(
+  DEATH_EVENT ~ ., data = model_data, method = "nnet",
+  metric = "ROC", maximize = TRUE, trControl = ctrl,
+  preProcess = c("center", "scale"), tuneGrid = grid_ann,
+  trace = FALSE, maxit = 1000, MaxNWts = 10000
+)
+```
+
+```{r selected-tuning}
+selected_tuning <- bind_rows(
+  LDA = fit_lda$bestTune,
+  QDA = fit_qda$bestTune,
+  "Linear SVM" = fit_svm_linear$bestTune,
+  "RBF SVM" = fit_svm_rbf$bestTune,
+  ANN = fit_ann$bestTune,
+  .id = "Model"
+)
+
+knitr::kable(selected_tuning, digits = 7)
+```
+
+# 7. Repeated cross-validation results
+
+```{r performance-table}
+metrics <- c(
+  "ROC", "Sensitivity", "Specificity", "Balanced_Accuracy", "Accuracy"
+)
+
+summarise_fit <- function(fit, model_name) {
+  fit$resample |>
+    summarise(across(all_of(metrics), ~ mean(.x, na.rm = TRUE))) |>
+    mutate(Model = model_name, .before = 1)
+}
+
+performance_table <- bind_rows(
+  summarise_fit(fit_lda, "LDA"),
+  summarise_fit(fit_qda, "QDA"),
+  summarise_fit(fit_svm_linear, "Linear SVM"),
+  summarise_fit(fit_svm_rbf, "RBF SVM"),
+  summarise_fit(fit_ann, "ANN")
+) |>
+  rename(
+    "ROC-AUC" = ROC,
+    "Balanced Accuracy" = Balanced_Accuracy
+  )
+
+knitr::kable(performance_table, digits = 3)
+```
+
+```{r model-auc-resamples, fig.cap="ROC-AUC distributions across the 25 validation resamples."}
+auc_resamples <- bind_rows(
+  fit_lda$resample |> transmute(Model = "LDA", Resample, ROC),
+  fit_qda$resample |> transmute(Model = "QDA", Resample, ROC),
+  fit_svm_linear$resample |> transmute(Model = "Linear SVM", Resample, ROC),
+  fit_svm_rbf$resample |> transmute(Model = "RBF SVM", Resample, ROC),
+  fit_ann$resample |> transmute(Model = "ANN", Resample, ROC)
+) |>
+  mutate(
+    Model = factor(
+      Model,
+      levels = c("LDA", "QDA", "Linear SVM", "RBF SVM", "ANN")
+    )
+  )
+
+auc_plot <- ggplot(auc_resamples, aes(Model, ROC, fill = Model)) +
+  geom_boxplot(width = 0.65, outlier.shape = NA, alpha = 0.85) +
+  geom_jitter(width = 0.12, alpha = 0.45, size = 1.4) +
+  scale_fill_brewer(palette = "Set2", guide = "none") +
+  labs(x = NULL, y = "ROC-AUC") +
+  theme_minimal(base_size = 11) +
+  theme(panel.grid.minor = element_blank())
+
+ggsave(
+  file.path(FIGURE_PATH, "model_auc_resamples.png"),
+  auc_plot,
+  width = 8,
+  height = 5,
+  dpi = 180
+)
+
+auc_plot
+```
+
+RBF SVM has the highest mean ROC-AUC. ANN has the highest sensitivity and
+balanced accuracy. LDA and linear SVM have high specificity but low sensitivity
+for deaths. Model preference depends on the evaluation objective and the relative
+cost of false negatives and false positives. Accuracy or training error alone is
+not sufficient for selection.
+
+# 8. Exploratory threshold analysis
+
+```{r oof-roc}
+rbf_pred <- fit_svm_rbf$pred |>
+  filter(
+    C == fit_svm_rbf$bestTune$C,
+    sigma == fit_svm_rbf$bestTune$sigma
+  )
+
+ann_pred <- fit_ann$pred |>
+  filter(
+    size == fit_ann$bestTune$size,
+    decay == fit_ann$bestTune$decay
+  )
+
+roc_rbf <- roc(
+  response = rbf_pred$obs,
+  predictor = rbf_pred$Died,
+  levels = c("Survived", "Died"),
+  direction = "<"
+)
+
+roc_ann <- roc(
+  response = ann_pred$obs,
+  predictor = ann_pred$Died,
+  levels = c("Survived", "Died"),
+  direction = "<"
+)
+
+roc_plot <- pROC::ggroc(
+  list("RBF SVM" = roc_rbf, ANN = roc_ann),
+  legacy.axes = TRUE,
+  linewidth = 1
+) +
+  geom_abline(intercept = 0, slope = 1, linetype = 3, color = "grey60") +
+  scale_color_manual(values = c("RBF SVM" = "#C44E52", ANN = "#4C72B0")) +
+  coord_equal() +
+  labs(
+    x = "1 - Specificity",
+    y = "Sensitivity",
+    color = "Model",
+    title = "Exploratory pooled out-of-fold ROC curves"
+  ) +
+  theme_minimal(base_size = 11) +
+  theme(legend.position = "bottom", panel.grid.minor = element_blank())
+
+ggsave(
+  file.path(FIGURE_PATH, "roc_rbf_vs_ann.png"),
+  roc_plot,
+  width = 7,
+  height = 6,
+  dpi = 180
+)
+
+roc_plot
+```
+
+```{r thresholds}
+coords_rbf <- coords(
+  roc_rbf, x = "best", best.method = "youden",
+  ret = c("threshold", "sensitivity", "specificity")
+)
+
+coords_ann <- coords(
+  roc_ann, x = "best", best.method = "youden",
+  ret = c("threshold", "sensitivity", "specificity")
+)
+
+threshold_comparison <- tibble(
+  Model = c("RBF SVM", "ANN"),
+  Pooled_OOF_AUC = c(as.numeric(auc(roc_rbf)), as.numeric(auc(roc_ann))),
+  Threshold = c(
+    as.numeric(coords_rbf$threshold),
+    as.numeric(coords_ann$threshold)
+  ),
+  Sensitivity = c(
+    as.numeric(coords_rbf$sensitivity),
+    as.numeric(coords_ann$sensitivity)
+  ),
+  Specificity = c(
+    as.numeric(coords_rbf$specificity),
+    as.numeric(coords_ann$specificity)
+  )
+)
+
+knitr::kable(threshold_comparison, digits = 3)
+```
+
+Each patient appears once per repeat in the pooled out-of-fold predictions.
+Therefore, these pooled ROC curves and Youden thresholds are exploratory
+summaries of repeated predictions, not independent validation results and not
+clinical thresholds. The primary comparison remains the mean of 25
+resample-level metrics.
+
+# 9. What changed
+
+| Item | Original coursework | Validation update |
+|---|---|---|
+| SVM evaluation | Training-set prediction | Repeated cross-validation |
+| Model comparison | Different validation schemes | Identical resampling folds |
+| Preprocessing | ANN scaled before splitting | Estimated inside training folds |
+| QDA priors | Reversed relative to factor order | Empirical priors in common workflow |
+| Metrics | Mainly misclassification rate | AUC, sensitivity, specificity, balanced accuracy, accuracy |
+| Conclusion | RBF SVM appeared dominant | Model choice depends on the objective |
+
+# 10. Interpretation
+
+The original 2.68% RBF SVM error does not estimate performance on unseen data.
+Under a common repeated cross-validation design, the performance gap is smaller
+and the models show different error profiles. RBF SVM provides the strongest
+average rank discrimination in this run. ANN identifies a larger share of deaths
+and has the highest balanced accuracy. LDA and linear SVM favor correct
+classification of survivors at the cost of lower death sensitivity.
+
+This is classification of DEATH_EVENT, not formal survival analysis,
+independent risk-factor inference, or evidence of clinical utility.
+
+# 11. Limitations
+
+- The sample contains 299 patients and 96 deaths.
+- The dataset is observational.
+- No external validation dataset is used.
+- Hyperparameter selection and performance estimation are not separated by
+  nested cross-validation, so modest optimistic bias may remain.
+- The pooled repeated-CV threshold analysis is exploratory.
+- The analysis classifies DEATH_EVENT. It is not survival analysis and does not
+  estimate mortality at a fixed time horizon.
+- Six continuous variables were retained for the coursework comparison.
+- The ANN implementation changed from neuralnet to nnet to support common
+  resampling.
+
+# Appendix: session information
+
+```{r session-info}
+sessionInfo()
+```

@@ -1,0 +1,23 @@
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+*.Rproj
+.DS_Store
+Thumbs.db
+
+# renv local library and transient state
+renv/library/
+renv/staging/
+renv/python/
+renv/local/
+renv/cellar/
+
+# R Markdown intermediates
+*_cache/
+*_files/
+*.utf8.md
+*.knit.md
+
+# Local working files
+tmp/
