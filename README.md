@@ -1,22 +1,31 @@
 # Heart Failure Model Validation
 
 > Improving Validation Design for Mortality Classification Models
+>
+> 심부전 사망 분류모델의 검증 설계 개선 및 성능 비교
 
 Re-evaluation of mortality classification models on the Heart Failure Clinical
 Records dataset after identifying inconsistencies in the original validation
 design.
 
-한국어 요약: 심부전 사망 분류모델의 검증 설계 개선 및 성능 비교
+**한국어 요약:** 기존 coursework에서는 모델마다 평가 방식이 달라 성능을
+직접 비교하기 어려웠습니다. 특히 RBF SVM의 낮은 오분류율이 training-set
+prediction 결과였음을 확인했습니다. 이에 모든 모델을 동일한 repeated
+cross-validation 조건에서 재평가하고, 지표별 trade-off를 다시 해석했습니다.
 
 ## Highlights
 
 - Identified that the original 2.68% RBF SVM error came from predicting the
   training data.
+  - 기존 RBF SVM의 2.68% 오분류율이 학습자료 재예측 결과임을 확인했습니다.
 - Re-evaluated five classifiers with identical stratified repeated
   cross-validation folds and fold-internal preprocessing.
+  - 다섯 분류모델을 동일한 반복 교차검증과 fold 내부 전처리 조건에서 재평가했습니다.
 - Compared ROC-AUC, sensitivity, specificity, balanced accuracy, and accuracy
   instead of relying on one error rate.
+  - 단일 오분류율 대신 여러 성능지표를 함께 비교했습니다.
 - Preserved the original coursework and documented why the conclusion changed.
+  - 원본 coursework를 보존하고 결론이 달라진 이유를 기록했습니다.
 
 ## 1. Project Overview
 
@@ -45,8 +54,8 @@ platelets, serum creatinine, and serum sodium.
 The source also includes time, a follow-up-duration variable. It is excluded
 from the classifiers because treating follow-up duration as an ordinary
 predictor could mix outcome-related information into the prediction task. This
-project is not survival analysis and does not estimate mortality at a fixed
-time horizon.
+project does not perform time-to-event modeling or estimate mortality at a
+fixed time horizon.
 
 Observed group differences were visible in the exploratory analysis. The death
 group was older on average, had lower ejection fraction, higher serum
@@ -119,6 +128,11 @@ These results do not support selecting one model from accuracy or training error
 alone. The preferred model depends on the evaluation objective and the relative
 cost of false negatives and false positives.
 
+**한국어 요약:** RBF SVM은 평균 ROC-AUC가 가장 높았고, ANN은 sensitivity와
+balanced accuracy가 가장 높았습니다. 따라서 단일 지표만으로 특정 모델이
+우월하다고 결론내리지 않고, 평가 목적과 오류 비용에 따른 trade-off를
+해석했습니다.
+
 ### Exploratory threshold analysis
 
 The pooled repeated-CV out-of-fold predictions produced an AUC of approximately
@@ -163,7 +177,8 @@ cut-offs.
   performance estimation are not fully independent, so modest optimistic bias
   may remain.
 - Threshold analysis is exploratory and reuses patients across CV repeats.
-- The target is DEATH_EVENT classification, not formal survival analysis.
+- The target is DEATH_EVENT classification rather than formal time-to-event
+  modeling.
 - The analysis does not predict mortality at a defined time horizon.
 - Only six continuous variables were retained for comparability with the
   coursework.
