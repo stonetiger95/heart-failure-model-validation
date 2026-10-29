@@ -13,7 +13,7 @@ ROC-AUC뿐 아니라 민감도(Sensitivity), 특이도(Specificity), 균형정�
 - 서로 달랐던 모델 평가 방식을 동일한 검증 조건으로 통일했습니다.
 - 학습오차(training error)를 일반화 성능으로 해석했던 문제를 발견하고 수정했습니다.
 - ROC-AUC, 민감도, 특이도, 균형정확도, 정확도(Accuracy)를 함께 비교했습니다.
-- 원본 분석과 개선 분석을 모두 보존해 결론이 바뀐 과정을 투명하게 기록했습니다.
+- 원본 분석과 개선 분석을 분리해 보존하고 평가 방식과 결과의 변화를 문서화했습니다.
 
 ## 1. 프로젝트 개요
 
@@ -54,7 +54,7 @@ ROC-AUC뿐 아니라 민감도(Sensitivity), 특이도(Specificity), 균형정�
 - ANN은 전체 데이터를 표준화한 뒤 분할하여 test set 정보가 전처리에 반영됐습니다.
 - QDA prior가 factor level 순서와 반대로 전달됐습니다.
 
-따라서 RBF SVM의 2.68% 오분류율은 unseen data에 대한 성능 추정치가 아니라 training error였습니다. 이 문제는 원본에서 조용히 수정하지 않고 공개용 원본 분석과 [validation_changes.md](docs/validation_changes.md)에 그대로 기록했습니다.
+따라서 RBF SVM의 2.68% 오분류율은 unseen data에 대한 성능 추정치가 아니라 training error였습니다. 원본 분석은 별도로 보존하고, 평가 방식의 문제와 수정 내용을 [validation_changes.md](docs/validation_changes.md)에 기록했습니다.
 
 Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box's M test에서도 공분산 동질성이 기각됐습니다. LDA와 QDA는 교육적 비교를 위해 유지하지만 결과는 이러한 가정 위배를 고려해 해석해야 합니다.
 
@@ -136,7 +136,7 @@ Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box
 - 원본 분석과의 비교를 위해 6개 연속형 변수만 사용했습니다.
 - 업데이트 ANN은 공통 resampling workflow를 위해 원본의 `neuralnet` 대신 `nnet`을 사용했습니다.
 
-이 저장소는 임상 적용, 의료기기 성능 또는 독립적인 위험요인 추론을 주장하지 않습니다.
+이 분석은 공개 관찰자료를 이용한 모델 비교이며, 임상 적용이나 의료기기 성능 평가를 목적으로 하지 않습니다.
 
 ## 11. 저장소 구조
 
