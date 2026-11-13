@@ -85,6 +85,8 @@ Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box
 
 ## 7. 원본 분석 대비 변경점
 
+[수업 당시 원본 보고서 (PDF)](original_coursework/original_report_redacted.pdf)에는 재검증 전 모델 비교가 실려 있습니다. 반복 교차검증으로 다시 산출한 수치는 위 **주요 결과** 표에서 확인할 수 있습니다.
+
 | 항목 | 원본 분석 | 개선 분석 |
 |---|---|---|
 | SVM 평가 | Training error | Repeated Cross-Validation |
