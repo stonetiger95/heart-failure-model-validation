@@ -2,28 +2,9 @@
 
 ## 심부전 사망 분류모델의 검증 설계 개선 및 성능 비교
 
-이 프로젝트는 통계학 복수전공의 다변량통계학 과정에서 수행한 LDA, QDA, SVM, ANN 비교 분석에서 시작했습니다.
-포트폴리오 검토 과정에서 모델별 평가 방식이 달라 성능을 직접 비교하기 어렵다는 문제를 확인했습니다.
-특히 RBF SVM의 2.68% 오분류율은 학습 데이터 재예측(training-set prediction) 결과였습니다.
-이에 모든 모델을 동일한 반복 교차검증(Repeated Cross-Validation) 조건에서 다시 평가했습니다.
-ROC-AUC뿐 아니라 민감도(Sensitivity), 특이도(Specificity), 균형정확도(Balanced Accuracy)를 함께 비교하여 모델별 trade-off를 재해석했습니다.
+원래 분석에서는 모델마다 평가 조건이 달랐습니다. RBF SVM의 오분류율 2.68%는 모델이 이미 학습한 데이터를 다시 예측해서 얻은 값이었습니다. 추적기간 변수를 제외하고 다섯 모델에 같은 반복 교차검증을 적용했습니다. RBF SVM의 평균 ROC-AUC는 0.788로 가장 높았으며, 민감도와 특이도에서는 모델마다 차이가 있었습니다.
 
-## 프로젝트 핵심
-
-- 서로 달랐던 모델 평가 방식을 동일한 검증 조건으로 통일했습니다.
-- 학습오차(training error)를 일반화 성능으로 해석했던 문제를 발견하고 수정했습니다.
-- ROC-AUC, 민감도, 특이도, 균형정확도, 정확도(Accuracy)를 함께 비교했습니다.
-- 원본 분석과 개선 분석을 분리해 보존하고 평가 방식과 결과의 변화를 문서화했습니다.
-
-## 1. 프로젝트 개요
-
-이 저장소는 최초 분석과 이후 수행한 검증 업데이트를 분리해 보존합니다.
-원본에서는 LDA, QDA, SVM, ANN의 성능이 서로 다른 평가 조건에서 산출되어 직접 비교하기 어려웠습니다.
-개선 분석은 기존의 다섯 모델과 6개 연속형 임상변수를 유지하되, 모든 모델에 동일한 resampling fold를 적용했습니다.
-
-프로젝트의 목적은 성능을 유리하게 다시 만드는 것이 아니라, **검증 설계(validation design)를 개선하여 공정한 비교 기준을 만드는 것**입니다.
-
-## 2. 데이터셋
+## 1. 데이터셋
 
 사용 데이터는 **Heart Failure Clinical Records**이며 총 299명의 기록을 포함합니다.
 
@@ -40,11 +21,11 @@ ROC-AUC뿐 아니라 민감도(Sensitivity), 특이도(Specificity), 균형정�
 
 ![Clinical variable distributions by outcome](figures/group_boxplots.png)
 
-## 3. 분석 질문
+## 2. 분석 질문
 
 > LDA, QDA, SVM, ANN을 동일한 resampling design에서 평가할 때, 모델별 판별 성능과 오류 특성은 어떻게 달라지는가?
 
-## 4. 기존 분석과 검증 문제
+## 3. 기존 분석과 검증 문제
 
 원본 결과는 다음과 같은 이유로 직접 비교하기 어려웠습니다.
 
@@ -58,7 +39,7 @@ ROC-AUC뿐 아니라 민감도(Sensitivity), 특이도(Specificity), 균형정�
 
 Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box's M test에서도 공분산 동질성이 기각됐습니다. LDA와 QDA는 교육적 비교를 위해 유지하지만 결과는 이러한 가정 위배를 고려해 해석해야 합니다.
 
-## 5. 개선한 검증 설계
+## 4. 개선한 검증 설계
 
 - 층화 5-fold 교차검증(Stratified 5-fold Cross-Validation)
 - 5회 반복, 총 25개 resample
@@ -71,7 +52,7 @@ Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box
 
 새로운 모델을 추가하거나 여러 seed를 탐색하지 않았으며, 성능 경쟁을 위한 추가 tuning도 수행하지 않았습니다.
 
-## 6. 주요 결과
+## 5. 주요 결과
 
 아래 수치는 렌더링된 분석 결과와 동일합니다.
 
@@ -85,7 +66,7 @@ Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box
 
 ![ROC-AUC across repeated cross-validation resamples](figures/model_auc_resamples.png)
 
-## 7. 결과 해석
+## 6. 결과 해석
 
 - **RBF SVM**은 평균 ROC-AUC가 가장 높았습니다.
 - **ANN**은 민감도와 균형정확도가 가장 높았습니다.
@@ -102,7 +83,7 @@ Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box
 
 ![Exploratory pooled out-of-fold ROC curves](figures/roc_rbf_vs_ann.png)
 
-## 8. 원본 분석 대비 변경점
+## 7. 원본 분석 대비 변경점
 
 | 항목 | 원본 분석 | 개선 분석 |
 |---|---|---|
@@ -114,7 +95,7 @@ Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box
 | 평가 지표 | 주로 misclassification rate | ROC-AUC, Sensitivity, Specificity, Balanced Accuracy, Accuracy |
 | 결론 | RBF SVM이 압도적으로 보임 | 평가 목적에 따라 모델 선택이 달라짐 |
 
-## 9. 수행한 작업
+## 8. 수행한 작업
 
 - 원본 분석의 모델별 검증 절차를 다시 검토했습니다.
 - 서로 다른 평가 방식 때문에 성능을 직접 비교할 수 없음을 확인했습니다.
@@ -124,7 +105,7 @@ Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box
 - Accuracy 하나가 아닌 여러 지표의 trade-off를 해석했습니다.
 - 개선 분석의 한계와 원본 대비 변경점을 문서화했습니다.
 
-## 10. 한계
+## 9. 한계
 
 - 표본은 299명이며 사망은 96건입니다.
 - 관찰자료(observational dataset)이므로 인과관계를 설명하지 않습니다.
@@ -138,7 +119,7 @@ Henze-Zirkler 검정에서는 다변량 정규성이 지지되지 않았고, Box
 
 이 분석은 공개 관찰자료를 이용한 모델 비교이며, 임상 적용이나 의료기기 성능 평가를 목적으로 하지 않습니다.
 
-## 11. 저장소 구조
+## 10. 저장소 구조
 
 ```text
 heart-failure-model-validation/
@@ -168,7 +149,7 @@ heart-failure-model-validation/
 └── LICENSE
 ```
 
-## 12. 재현 방법
+## 11. 재현 방법
 
 저장소 루트에서 다음 명령을 실행합니다.
 
@@ -180,7 +161,7 @@ rmarkdown::render("analysis/heart_failure_validation.Rmd")
 
 분석은 저장소 내부의 상대 데이터 경로만 사용합니다. 실행 시 `figures/`의 PNG 3개와 분석 HTML이 생성되며, 패키지 버전은 `renv.lock`에 기록되어 있습니다. 생성된 HTML의 appendix에서 `sessionInfo()`를 확인할 수 있습니다.
 
-## 13. 데이터 출처 및 라이선스
+## 12. 데이터 출처 및 라이선스
 
 Dataset: **Heart Failure Clinical Records**
 
@@ -192,7 +173,7 @@ Dataset: **Heart Failure Clinical Records**
 
 CSV는 **CC BY 4.0** 조건으로 재배포합니다. 저장소의 코드와 작성 문서는 **MIT License**를 적용하며, MIT License가 데이터셋의 출처 표시 조건을 대체하지 않습니다.
 
-## 14. 참고자료
+## 13. 참고자료
 
 - Ahmad, T., Munir, A., Bhatti, S. H., Aftab, M., & Raza, M. A. (2017).
   [Survival analysis of heart failure patients: A case study](https://doi.org/10.1371/journal.pone.0181001).
